@@ -10,6 +10,13 @@ class CommitInfo(BaseModel):
     message: str
 
 
+class BlameEntry(BaseModel):
+    line_number: int
+    line_content: str
+    sha: str        # short SHA of the commit that last touched this line
+    author: str
+
+
 class SuspectFunction(BaseModel):
     name: str
     file: str
