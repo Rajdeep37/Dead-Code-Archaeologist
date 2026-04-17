@@ -1,0 +1,35 @@
+# External prerequisites installed outside pip:
+# - Git CLI
+# - Ollama
+# - A local model such as `mistral:7b-instruct-q4_K_M`
+
+# API service
+fastapi>=0.115
+uvicorn[standard]>=0.30
+
+# Repository mining and graph analysis
+GitPython>=3.1
+networkx>=3.2
+
+# AST parsing and multi-language support
+tree-sitter>=0.23
+tree-sitter-python>=0.23
+tree-sitter-javascript>=0.23
+tree-sitter-typescript>=0.23
+
+# LLM orchestration and provider adapters
+langchain>=0.3
+langchain-ollama>=0.3
+langchain-anthropic>=0.3
+pydantic>=2.7
+
+# Caching and configuration
+diskcache>=5.6
+python-dotenv>=1.0
+
+# Reporting and data handling
+pandas>=2.2
+reportlab>=4.2
+
+# Testing
+pytest>=8.0

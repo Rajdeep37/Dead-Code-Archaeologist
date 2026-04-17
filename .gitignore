@@ -1,0 +1,12 @@
+backend/.venv/
+backend/venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Runtime-generated artifacts (cache, reports, exports)
+backend/artifacts/
