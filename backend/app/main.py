@@ -6,8 +6,9 @@ Run with:
 
 from fastapi import FastAPI, HTTPException, Query
 
+from app.dead_code_detector import DeadCodeDetector
 from app.git_explorer import GitExplorer
-from app.models import BlameEntry, CommitInfo
+from app.models import BlameEntry, CommitInfo, SuspectFunction
 
 app = FastAPI(title="Dead Code Archaeologist API")
 
@@ -71,3 +72,33 @@ def commit_diff(
         return {"sha": sha, "diff": explorer.get_commit_diff(sha)}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+# ------------------------------------------------------------------ #
+# Dead code analysis endpoints                                         #
+# ------------------------------------------------------------------ #
+
+def _get_detector(repo_path: str) -> DeadCodeDetector:
+    """Create a DeadCodeDetector or raise a 400 with a clear message."""
+    try:
+        return DeadCodeDetector(repo_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/analyze", response_model=list[SuspectFunction])
+def analyze_repo(
+    repo_path: str = Query(..., description="Absolute path to the local git repository"),
+):
+    """Find suspect dead-code functions in the repository."""
+    detector = _get_detector(repo_path)
+    return detector.find_suspects()
+
+
+@app.get("/call-graph")
+def call_graph(
+    repo_path: str = Query(..., description="Absolute path to the local git repository"),
+) -> dict[str, list[str]]:
+    """Return the call graph as an adjacency dict."""
+    detector = _get_detector(repo_path)
+    return detector.get_call_graph_dict()

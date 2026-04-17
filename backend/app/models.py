@@ -22,6 +22,8 @@ class SuspectFunction(BaseModel):
     file: str
     line_start: int
     line_end: int
+    suspect_type: str = "uncalled"  # "uncalled" | "comment_smell"
+    call_count: int = 0
 
 
 class Verdict(BaseModel):
