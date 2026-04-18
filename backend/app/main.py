@@ -7,6 +7,7 @@ Run with:
 import json
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from app.cache import VerdictCache
@@ -16,6 +17,13 @@ from app.llm_agent import LLMAgent, build_evidence
 from app.models import BlameEntry, CommitInfo, SuspectFunction, Verdict
 
 app = FastAPI(title="Dead Code Archaeologist API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ------------------------------------------------------------------ #

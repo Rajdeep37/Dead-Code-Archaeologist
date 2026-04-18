@@ -1,17 +1,23 @@
-function App() {
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { AnalysisProvider } from "./context/AnalysisContext";
+import Header from "./components/Header";
+import AnalyzePage from "./pages/AnalyzePage";
+import VerdictDetailPage from "./pages/VerdictDetailPage";
+
+export default function App() {
   return (
-    <main className="app-shell">
-      <section className="hero-card">
-        <p className="eyebrow">Dead Code Archaeologist</p>
-        <h1>React frontend, Python backend.</h1>
-        <p className="summary">
-          The frontend will visualize suspects, evidence, and archaeology reports.
-          The backend will mine git history, analyze source code, and generate
-          verdicts.
-        </p>
-      </section>
-    </main>
+    <BrowserRouter>
+      <AnalysisProvider>
+        <div className="app-layout">
+          <Header />
+          <main className="main-container">
+            <Routes>
+              <Route path="/" element={<AnalyzePage />} />
+              <Route path="/verdict/:file/:name" element={<VerdictDetailPage />} />
+            </Routes>
+          </main>
+        </div>
+      </AnalysisProvider>
+    </BrowserRouter>
   );
 }
-
-export default App;
