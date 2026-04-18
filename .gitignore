@@ -10,3 +10,9 @@ frontend/.vite/
 
 # Runtime-generated artifacts (cache, reports, exports)
 backend/artifacts/
+
+# Environment
+.env
+
+# Verdict cache
+.verdicts_cache/
