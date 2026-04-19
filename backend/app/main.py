@@ -35,18 +35,10 @@ app.add_middleware(
 )
 
 
-# ------------------------------------------------------------------ #
-# Health                                                               #
-# ------------------------------------------------------------------ #
-
 @app.get("/health")
 def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
 
-
-# ------------------------------------------------------------------ #
-# Git explorer endpoints                                               #
-# ------------------------------------------------------------------ #
 
 def _get_explorer(repo_path: str) -> GitExplorer:
     """Create a GitExplorer or raise a 400 with a clear message."""
@@ -61,10 +53,7 @@ def list_commits(
     repo_path: str = Query(..., description="Absolute path to the local git repository"),
     file_path: str | None = Query(None, description="Filter to commits that touched this file"),
 ):
-    """Return all commits for the repository, newest first.
-
-    Optionally filter to a single file with ``file_path``.
-    """
+    """Return all commits, newest first. Optionally filter by file."""
     explorer = _get_explorer(repo_path)
     return explorer.get_all_commits(file_path=file_path)
 
@@ -96,10 +85,6 @@ def commit_diff(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-# ------------------------------------------------------------------ #
-# Dead code analysis endpoints                                         #
-# ------------------------------------------------------------------ #
-
 def _get_detector(repo_path: str) -> DeadCodeDetector:
     """Create a DeadCodeDetector or raise a 400 with a clear message."""
     try:
@@ -126,19 +111,11 @@ def call_graph(
     return detector.get_call_graph_dict()
 
 
-# ------------------------------------------------------------------ #
-# LLM verdict endpoints (SSE streaming)                                #
-# ------------------------------------------------------------------ #
-
 @app.get("/verdicts")
 async def verdicts_stream(
     repo_path: str = Query(..., description="Absolute path to the local git repository"),
 ):
-    """Stream LLM verdicts for all suspects as Server-Sent Events.
-
-    Each event is a JSON-encoded Verdict. Cached verdicts are served
-    instantly; uncached ones are judged by the LLM on the fly.
-    """
+    """Stream LLM verdicts for all suspects as Server-Sent Events (one JSON Verdict per event)."""
     try:
         explorer = GitExplorer(repo_path)
     except ValueError as exc:
@@ -181,8 +158,6 @@ async def _verdict_generator(explorer: GitExplorer, detector: DeadCodeDetector):
                 yield f"event: verdict\ndata: {verdict.model_dump_json()}\n\n"
                 continue
 
-            # LLM call with keepalive: emit an SSE comment every 15 s so the
-            # browser/proxy never sees a silent connection and drops it.
             logger.info(
                 "[%d/%d] judging: %s (%s)", i + 1, total, suspect.name, suspect.file
             )

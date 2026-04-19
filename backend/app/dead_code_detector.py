@@ -1,11 +1,4 @@
-"""Dead code detector – Week 2 module.
-
-Responsibilities:
-- Build a call graph from parsed functions and call sites.
-- Find functions defined but never called (primary suspects).
-- Scan for TODO/FIXME/HACK comments, commented-out code blocks,
-  and old feature flags.
-"""
+"""Dead code detector: builds a call graph and surfaces uncalled functions and comment smells."""
 
 from __future__ import annotations
 
@@ -42,8 +35,6 @@ class DeadCodeDetector:
         self._parsed: list[ParsedFile] = []
         self._graph: nx.DiGraph | None = None
 
-    # ---- public API -------------------------------------------------------
-
     def find_suspects(self) -> list[SuspectFunction]:
         """Return all suspected dead-code functions."""
         self._ensure_graph()
@@ -60,8 +51,6 @@ class DeadCodeDetector:
             node: sorted(self._graph.successors(node))
             for node in sorted(self._graph.nodes)
         }
-
-    # ---- private helpers --------------------------------------------------
 
     def _collect_python_files(self) -> list[str]:
         """Return absolute paths for all tracked ``.py`` files in the repo."""
@@ -90,8 +79,6 @@ class DeadCodeDetector:
         """Build a directed graph: node per defined function, edge per call."""
         g = nx.DiGraph()
 
-        # First pass: register every defined function as a node.
-        # Key format: "relative/path.py::function_name"
         all_func_names: set[str] = set()
         route_decorated: set[str] = set()
 
@@ -103,16 +90,10 @@ class DeadCodeDetector:
                 all_func_names.add(fn.name)
             route_decorated.update(pf.route_decorated_functions)
 
-        # Store route-decorated names for exclusion later.
         self._route_decorated = route_decorated
 
-        # Second pass: add edges. For each call site, if a function with that
-        # name exists anywhere in the project, add an edge caller → callee.
-        # This is name-based resolution (no cross-module type inference).
         for pf in self._parsed:
             rel = self._relative(pf.path)
-            # Figure out which functions in this file could be the "caller".
-            # We attribute all top-level calls to a virtual "<module>" node.
             callers = {fn.name: f"{rel}::{fn.name}" for fn in pf.functions}
 
             for called_name in pf.calls:

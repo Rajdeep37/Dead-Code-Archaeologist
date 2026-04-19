@@ -1,13 +1,6 @@
-"""LLM reasoning agent – Week 3 module.
+"""LLM reasoning agent: judges suspect functions and returns structured Verdicts.
 
-Responsibilities:
-- Accept a suspect function + its git evidence bundle.
-- Call the local Ollama/Mistral model (or Claude Haiku when hosted).
-- Return a structured Verdict with confidence score and rationale.
-
-Provider is chosen via the LLM_PROVIDER env variable:
-  LLM_PROVIDER=ollama  (default, local)
-  LLM_PROVIDER=anthropic  (hosted demo)
+Set LLM_PROVIDER=ollama (default) or LLM_PROVIDER=anthropic via env.
 """
 
 from __future__ import annotations
@@ -30,29 +23,19 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-
 LLM_MODEL: str = os.getenv("LLM_MODEL", "mistral:7b-instruct-q4_K_M")
 OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
-# Evidence truncation limits — prevent context-window overflow on large functions
+# Evidence truncation limits
 _MAX_SOURCE_LINES: int = int(os.getenv("MAX_SOURCE_LINES", "80"))
 _MAX_BLAME_LINES: int  = int(os.getenv("MAX_BLAME_LINES",  "40"))
 _MAX_COMMITS: int      = int(os.getenv("MAX_COMMITS",       "3"))
 
-# Per-call timeout for each ainvoke attempt (seconds)
+# Per-call timeout (seconds)
 _LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", "120"))
 
-# Maximum total evidence characters before skipping the LLM call entirely.
-# Very large prompts reliably cause timeouts — skip them proactively.
+# Max evidence chars before skipping the LLM call
 _MAX_EVIDENCE_CHARS: int = int(os.getenv("MAX_EVIDENCE_CHARS", "6000"))
-
-# ---------------------------------------------------------------------------
-# Evidence bundle
-# ---------------------------------------------------------------------------
-
 
 @dataclass
 class EvidenceBundle:
@@ -66,7 +49,6 @@ class EvidenceBundle:
 
 def build_evidence(suspect: SuspectFunction, explorer: GitExplorer) -> EvidenceBundle:
     """Assemble an EvidenceBundle for *suspect* using data from *explorer*."""
-    # Read the function body from disk (truncated to avoid context overflow)
     abs_path = explorer.root / suspect.file
     lines: list[str] = []
     if abs_path.is_file():
@@ -84,14 +66,12 @@ def build_evidence(suspect: SuspectFunction, explorer: GitExplorer) -> EvidenceB
             lines = raw_lines
     source_snippet = "\n".join(lines)
 
-    # Recent commits that touched this file
     recent_commits: list[CommitInfo] = []
     try:
         recent_commits = explorer.get_file_history(suspect.file)[:_MAX_COMMITS]
     except Exception:
         pass
 
-    # Blame for the function's line range (truncated)
     blame_summary = ""
     try:
         blame_entries = explorer.get_file_blame(suspect.file)
@@ -134,10 +114,6 @@ def evidence_is_oversized(bundle: EvidenceBundle) -> bool:
         return True
     return False
 
-
-# ---------------------------------------------------------------------------
-# Prompt
-# ---------------------------------------------------------------------------
 
 _SYSTEM_PROMPT = """\
 You are an expert code reviewer specialising in dead-code detection.
@@ -259,21 +235,17 @@ class LLMAgent:
         """Parse the LLM's raw text into a Verdict, raising on failure."""
         data = json.loads(raw)
 
-        # Handle author_context being a dict instead of a string
         author_context = data.get("author_context", "")
         if isinstance(author_context, dict):
-            # Flatten dict to string: "key: value, key2: value2"
             author_context = ", ".join(
                 f"{k}: {v}" for k, v in author_context.items()
             )
 
-        # Handle missing or invalid confidence
         try:
             confidence = int(data["confidence"])
         except (KeyError, TypeError, ValueError):
-            confidence = 50  # default to "uncertain"
+            confidence = 50
 
-        # Handle missing verdict — default to investigate
         verdict_str = data.get("verdict", "investigate")
         if verdict_str not in ("delete", "investigate", "keep"):
             verdict_str = "investigate"

@@ -1,10 +1,4 @@
-"""AST parser – Week 2 module.
-
-Responsibilities:
-- Parse Python files with Tree-sitter.
-- Extract every function definition: name, line range.
-- Collect all call sites so the call graph can be built.
-"""
+"""AST parser: extracts function definitions and call sites from Python files."""
 
 from __future__ import annotations
 
@@ -13,10 +7,6 @@ from pathlib import Path
 
 from tree_sitter import Language, Parser, Query, QueryCursor
 import tree_sitter_python
-
-# ---------------------------------------------------------------------------
-# Language setup
-# ---------------------------------------------------------------------------
 
 PY_LANGUAGE = Language(tree_sitter_python.language())
 
@@ -41,10 +31,6 @@ _SUPPORTED_EXTENSIONS: dict[str, str] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Data classes
-# ---------------------------------------------------------------------------
-
 @dataclass
 class ParsedFunction:
     """A single function extracted from a source file."""
@@ -66,12 +52,8 @@ class ParsedFile:
     route_decorated_functions: set[str] = field(default_factory=set)
 
 
-# ---------------------------------------------------------------------------
-# FileParser
-# ---------------------------------------------------------------------------
-
 class FileParser:
-    """Parse a single Python source file using Tree-sitter."""
+    """Parses a single Python source file using Tree-sitter."""
 
     def __init__(self, file_path: str) -> None:
         self.file_path = file_path
@@ -82,8 +64,6 @@ class FileParser:
         self._parser = Parser(PY_LANGUAGE)
         source_bytes = Path(file_path).read_bytes()
         self._tree = self._parser.parse(source_bytes)
-
-    # ---- public API -------------------------------------------------------
 
     def extract_functions(self) -> list[ParsedFunction]:
         """Return every function defined in the file."""
@@ -114,10 +94,7 @@ class FileParser:
         return sorted(seen)
 
     def extract_route_decorated_functions(self) -> set[str]:
-        """Return names of functions decorated with route-like decorators.
-
-        Catches patterns such as ``@app.get("/path")``, ``@router.post(...)``.
-        """
+        """Return names of functions with route-like decorators (e.g. ``@app.get``)."""
         cursor = QueryCursor(_DECORATOR_QUERY)
         matches = cursor.matches(self._tree.root_node)
         names: set[str] = set()
@@ -128,12 +105,8 @@ class FileParser:
         return names
 
 
-# ---------------------------------------------------------------------------
-# Module-level convenience
-# ---------------------------------------------------------------------------
-
 def parse_file(path: str) -> ParsedFile:
-    """Parse *path* and return a :class:`ParsedFile` with functions & calls."""
+    """Parse *path* and return a ParsedFile with functions and calls."""
     fp = FileParser(path)
     return ParsedFile(
         path=path,

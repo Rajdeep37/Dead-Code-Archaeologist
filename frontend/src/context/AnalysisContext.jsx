@@ -17,21 +17,18 @@ export function AnalysisProvider({ children }) {
     const path = repoPath.trim();
     if (!path || streaming) return;
 
-    // Reset previous results
     setVerdicts([]);
     setErrors([]);
     setTotal(0);
     setCallGraph(null);
     setStreaming(true);
 
-    // Fetch call graph in parallel
     setGraphLoading(true);
     fetchCallGraph(path)
       .then(setCallGraph)
       .catch(() => {}) // non-critical
       .finally(() => setGraphLoading(false));
 
-    // Stream verdicts
     sourceRef.current = streamVerdicts(path, {
       onStart: ({ total: t }) => setTotal(t),
       onVerdict: (v) => setVerdicts((prev) => [...prev, v]),

@@ -46,7 +46,6 @@ export default function AnalyzePage() {
 
   return (
     <>
-      {/* Repo input header */}
       <div className="repo-header">
         <div className="repo-header__title">
           <strong>Dead Code Archaeologist</strong> / analyze
@@ -77,10 +76,8 @@ export default function AnalyzePage() {
         </div>
       </div>
 
-      {/* Streaming progress */}
       {streaming && <ProgressBanner done={verdicts.length} total={total} />}
 
-      {/* Errors */}
       {errors.map((err, i) => (
         <div key={i} className="flash flash-error">
           <AlertTriangle size={14} /> Failed to judge{" "}
@@ -88,10 +85,9 @@ export default function AnalyzePage() {
         </div>
       ))}
 
-      {/* ── Verdicts results ────────────────────────────────────── */}
+
       {verdicts.length > 0 && (
         <>
-          {/* Export toolbar */}
           <div className="export-toolbar">
             <Download size={14} className="export-toolbar__icon" />
             <span className="export-toolbar__label">Export verdicts:</span>
@@ -109,7 +105,6 @@ export default function AnalyzePage() {
             </button>
           </div>
 
-          {/* Filter tabs */}
           <div className="tab-nav">
             {["all", "delete", "investigate", "keep"].map((f) => (
               <button
@@ -125,7 +120,6 @@ export default function AnalyzePage() {
             ))}
           </div>
 
-          {/* Suspect list */}
           <div className="suspect-list">
             <div className="suspect-list__header">
               {filtered.length} suspect{filtered.length !== 1 ? "s" : ""}
@@ -147,7 +141,7 @@ export default function AnalyzePage() {
         </>
       )}
 
-      {/* ── Call graph ──────────────────────────────────────────── */}
+
       {(callGraph || graphLoading) && (
         <div style={{ marginTop: 32 }}>
           <div className="section-heading">
@@ -239,7 +233,6 @@ export default function AnalyzePage() {
         </div>
       )}
 
-      {/* Empty state */}
       {!streaming && verdicts.length === 0 && repoPath === "" && (
         <div className="blankslate">
           <div className="blankslate__icon">

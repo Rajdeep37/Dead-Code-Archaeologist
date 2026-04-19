@@ -21,10 +21,7 @@ export function fetchCallGraph(repoPath) {
   return fetchJSON(`/call-graph?repo_path=${encodeURIComponent(repoPath)}`);
 }
 
-/**
- * Stream LLM verdicts via SSE.
- * Returns an EventSource-like interface; call `close()` to stop.
- *
+/** Stream LLM verdicts via SSE. Returns an EventSource; call `close()` to stop.
  * @param {string} repoPath
  * @param {object} handlers - { onStart, onVerdict, onError, onDone }
  */
