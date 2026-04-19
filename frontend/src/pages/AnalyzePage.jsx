@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Search as SearchIcon, FlaskConical, Download, GitFork, AlertTriangle, Skull } from "lucide-react";
 import { useAnalysis } from "../context/AnalysisContext";
@@ -28,6 +28,11 @@ export default function AnalyzePage() {
   const [graphSearch, setGraphSearch] = useState("");
   const navigate = useNavigate();
 
+  // Reset search whenever a fresh call graph arrives
+  useEffect(() => {
+    if (callGraph) setGraphSearch("");
+  }, [callGraph]);
+
   const handleKeyDown = (e) => {
     if (e.key === "Enter") startAnalysis();
   };
@@ -43,6 +48,24 @@ export default function AnalyzePage() {
     investigate: verdicts.filter((v) => v.verdict === "investigate").length,
     keep: verdicts.filter((v) => v.verdict === "keep").length,
   };
+
+  // Search only the function-name portion (after "::") so "main" won't match
+  // every function defined in main.py
+  const graphEntries = useMemo(() => {
+    if (!callGraph) return [];
+    const term = graphSearch.toLowerCase();
+    return Object.entries(callGraph)
+      .filter(([node, callees]) => {
+        if (!term) return true;
+        const funcName = node.includes("::") ? node.split("::").pop() : node;
+        if (funcName.toLowerCase().includes(term)) return true;
+        return callees.some((c) => {
+          const calleeName = c.includes("::") ? c.split("::").pop() : c;
+          return calleeName.toLowerCase().includes(term);
+        });
+      })
+      .sort(([a], [b]) => a.localeCompare(b));
+  }, [callGraph, graphSearch]);
 
   return (
     <>
@@ -172,64 +195,51 @@ export default function AnalyzePage() {
             </div>
           )}
 
-          {callGraph && (() => {
-            const entries = Object.entries(callGraph)
-              .filter(
-                ([node, callees]) =>
-                  !graphSearch ||
-                  node.toLowerCase().includes(graphSearch.toLowerCase()) ||
-                  callees.some((c) =>
-                    c.toLowerCase().includes(graphSearch.toLowerCase())
-                  )
-              )
-              .sort(([a], [b]) => a.localeCompare(b));
-
-            return (
-              <>
-                <div className="repo-input-row" style={{ marginBottom: 12 }}>
-                  <input
-                    className="repo-input"
-                    placeholder="Search functions..."
-                    value={graphSearch}
-                    onChange={(e) => setGraphSearch(e.target.value)}
-                    style={{ fontFamily: "var(--font-sans)" }}
-                  />
-                </div>
-                <div className="graph-table-wrapper">
-                  <table className="graph-table">
-                    <thead>
-                      <tr>
-                        <th style={{ width: "35%" }}>Function</th>
-                        <th>Calls</th>
+          {callGraph && (
+            <>
+              <div className="repo-input-row" style={{ marginBottom: 12 }}>
+                <input
+                  className="repo-input"
+                  placeholder="Search functions..."
+                  value={graphSearch}
+                  onChange={(e) => setGraphSearch(e.target.value)}
+                  style={{ fontFamily: "var(--font-sans)" }}
+                />
+              </div>
+              <div className="graph-table-wrapper">
+                <table className="graph-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: "35%" }}>Function</th>
+                      <th>Calls</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {graphEntries.map(([node, callees]) => (
+                      <tr key={node}>
+                        <td>{node}</td>
+                        <td>
+                          {callees.length > 0 ? (
+                            callees.map((c, i) => (
+                              <span key={c}>
+                                {i > 0 && ", "}
+                                <span className="graph-table__callee">{c}</span>
+                              </span>
+                            ))
+                          ) : (
+                            <span className="graph-table__leaf">no outgoing calls</span>
+                          )}
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {entries.map(([node, callees]) => (
-                        <tr key={node}>
-                          <td>{node}</td>
-                          <td>
-                            {callees.length > 0 ? (
-                              callees.map((c, i) => (
-                                <span key={c}>
-                                  {i > 0 && ", "}
-                                  <span className="graph-table__callee">{c}</span>
-                                </span>
-                              ))
-                            ) : (
-                              <span className="graph-table__leaf">no outgoing calls</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div style={{ marginTop: 8, fontSize: 13, color: "var(--color-fg-muted)" }}>
-                  {entries.length} of {Object.keys(callGraph).length} functions shown
-                </div>
-              </>
-            );
-          })()}
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ marginTop: 8, fontSize: 13, color: "var(--color-fg-muted)" }}>
+                {graphEntries.length} of {Object.keys(callGraph).length} functions shown
+              </div>
+            </>
+          )}
         </div>
       )}
 
