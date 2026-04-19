@@ -12,7 +12,9 @@ Provider is chosen via the LLM_PROVIDER env variable:
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,12 +28,26 @@ from app.models import CommitInfo, SuspectFunction, Verdict
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
 LLM_MODEL: str = os.getenv("LLM_MODEL", "mistral:7b-instruct-q4_K_M")
 OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+
+# Evidence truncation limits — prevent context-window overflow on large functions
+_MAX_SOURCE_LINES: int = int(os.getenv("MAX_SOURCE_LINES", "80"))
+_MAX_BLAME_LINES: int  = int(os.getenv("MAX_BLAME_LINES",  "40"))
+_MAX_COMMITS: int      = int(os.getenv("MAX_COMMITS",       "3"))
+
+# Per-call timeout for each ainvoke attempt (seconds)
+_LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", "120"))
+
+# Maximum total evidence characters before skipping the LLM call entirely.
+# Very large prompts reliably cause timeouts — skip them proactively.
+_MAX_EVIDENCE_CHARS: int = int(os.getenv("MAX_EVIDENCE_CHARS", "6000"))
 
 # ---------------------------------------------------------------------------
 # Evidence bundle
@@ -50,22 +66,32 @@ class EvidenceBundle:
 
 def build_evidence(suspect: SuspectFunction, explorer: GitExplorer) -> EvidenceBundle:
     """Assemble an EvidenceBundle for *suspect* using data from *explorer*."""
-    # Read the function body from disk
+    # Read the function body from disk (truncated to avoid context overflow)
     abs_path = explorer.root / suspect.file
     lines: list[str] = []
     if abs_path.is_file():
         all_lines = abs_path.read_text(encoding="utf-8", errors="replace").splitlines()
-        lines = all_lines[max(0, suspect.line_start - 1) : suspect.line_end]
+        raw_lines = all_lines[max(0, suspect.line_start - 1) : suspect.line_end]
+        if len(raw_lines) > _MAX_SOURCE_LINES:
+            half = _MAX_SOURCE_LINES // 2
+            omitted = len(raw_lines) - _MAX_SOURCE_LINES
+            lines = (
+                raw_lines[:half]
+                + [f"    # ... {omitted} lines omitted ..."]
+                + raw_lines[-half:]
+            )
+        else:
+            lines = raw_lines
     source_snippet = "\n".join(lines)
 
-    # Recent commits that touched this file (last 5)
+    # Recent commits that touched this file
     recent_commits: list[CommitInfo] = []
     try:
-        recent_commits = explorer.get_file_history(suspect.file)[:5]
+        recent_commits = explorer.get_file_history(suspect.file)[:_MAX_COMMITS]
     except Exception:
         pass
 
-    # Blame for the function's line range
+    # Blame for the function's line range (truncated)
     blame_summary = ""
     try:
         blame_entries = explorer.get_file_blame(suspect.file)
@@ -73,10 +99,14 @@ def build_evidence(suspect: SuspectFunction, explorer: GitExplorer) -> EvidenceB
             e for e in blame_entries
             if suspect.line_start <= e.line_number <= suspect.line_end
         ]
+        truncated = len(relevant) > _MAX_BLAME_LINES
+        relevant = relevant[:_MAX_BLAME_LINES]
         blame_lines = [
             f"  L{e.line_number}: {e.author} ({e.sha}) | {e.line_content}"
             for e in relevant
         ]
+        if truncated:
+            blame_lines.append(f"  ... (truncated to first {_MAX_BLAME_LINES} lines)")
         blame_summary = "\n".join(blame_lines)
     except Exception:
         pass
@@ -87,6 +117,22 @@ def build_evidence(suspect: SuspectFunction, explorer: GitExplorer) -> EvidenceB
         recent_commits=recent_commits,
         blame_summary=blame_summary,
     )
+
+
+def evidence_is_oversized(bundle: EvidenceBundle) -> bool:
+    """Return True if the total evidence exceeds the configured character budget."""
+    total = (
+        len(bundle.source_snippet)
+        + len(bundle.blame_summary)
+        + sum(len(c.message) for c in bundle.recent_commits)
+    )
+    if total > _MAX_EVIDENCE_CHARS:
+        logger.debug(
+            "[LLM] evidence too large for %s: %d chars (limit %d)",
+            bundle.suspect.name, total, _MAX_EVIDENCE_CHARS,
+        )
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -170,27 +216,43 @@ class LLMAgent:
 
     async def judge(self, bundle: EvidenceBundle) -> Verdict:
         """Ask the LLM to judge a suspect and return a Verdict."""
+        name = bundle.suspect.name
         messages = [
             SystemMessage(content=_SYSTEM_PROMPT),
             HumanMessage(content=_build_human_message(bundle)),
         ]
 
-        # First attempt
-        response = await self._llm.ainvoke(messages)
+        # First attempt (bounded by timeout)
+        logger.debug("[LLM] invoking for %s", name)
+        response = await asyncio.wait_for(
+            self._llm.ainvoke(messages), timeout=_LLM_TIMEOUT
+        )
         try:
-            return self._parse_verdict(response.content, bundle.suspect)
+            verdict = self._parse_verdict(response.content, bundle.suspect)
+            logger.debug(
+                "[LLM] verdict=%s confidence=%d for %s",
+                verdict.verdict, verdict.confidence, name,
+            )
+            return verdict
         except (json.JSONDecodeError, KeyError, ValueError):
-            pass
+            logger.warning("[LLM] bad JSON on first attempt for %s — retrying", name)
 
-        # Retry with a stricter nudge
+        # Retry with a stricter nudge (also bounded)
         messages.append(response)
         messages.append(
             HumanMessage(
                 content="That was not valid JSON. Reply with ONLY the raw JSON object, nothing else."
             ),
         )
-        response = await self._llm.ainvoke(messages)
-        return self._parse_verdict(response.content, bundle.suspect)
+        response = await asyncio.wait_for(
+            self._llm.ainvoke(messages), timeout=_LLM_TIMEOUT
+        )
+        verdict = self._parse_verdict(response.content, bundle.suspect)
+        logger.debug(
+            "[LLM] retry verdict=%s confidence=%d for %s",
+            verdict.verdict, verdict.confidence, name,
+        )
+        return verdict
 
     @staticmethod
     def _parse_verdict(raw: str, suspect: SuspectFunction) -> Verdict:

@@ -4,7 +4,9 @@ Run with:
     uvicorn app.main:app --reload
 """
 
+import asyncio
 import json
+import logging
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,8 +15,15 @@ from fastapi.responses import StreamingResponse
 from app.cache import VerdictCache
 from app.dead_code_detector import DeadCodeDetector
 from app.git_explorer import GitExplorer
-from app.llm_agent import LLMAgent, build_evidence
+from app.llm_agent import LLMAgent, build_evidence, evidence_is_oversized
 from app.models import BlameEntry, CommitInfo, SuspectFunction, Verdict
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)-8s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Dead Code Archaeologist API")
 
@@ -150,34 +159,86 @@ async def verdicts_stream(
 async def _verdict_generator(explorer: GitExplorer, detector: DeadCodeDetector):
     """Async generator that yields SSE events — one per suspect."""
     suspects = detector.find_suspects()
+    total = len(suspects)
     repo_sha = explorer.repo.head.commit.hexsha
 
     cache_dir = str(explorer.root / ".verdicts_cache")
     cache = VerdictCache(cache_dir)
     agent = LLMAgent()
 
+    logger.info("Starting analysis: %d suspects in %s", total, explorer.root)
+
     try:
-        # Send an initial event with the total count
-        yield f"event: start\ndata: {json.dumps({'total': len(suspects)})}\n\n"
+        yield f"event: start\ndata: {json.dumps({'total': total})}\n\n"
 
         for i, suspect in enumerate(suspects):
             key = cache.make_key(repo_sha, suspect.file, suspect.name)
 
-            # Check cache first
+            # Cache hit — serve instantly
             verdict = cache.get(key)
             if verdict is not None:
-                payload = verdict.model_dump_json()
-                yield f"event: verdict\ndata: {payload}\n\n"
+                logger.info("[%d/%d] cache hit: %s", i + 1, total, suspect.name)
+                yield f"event: verdict\ndata: {verdict.model_dump_json()}\n\n"
                 continue
 
-            # LLM call
+            # LLM call with keepalive: emit an SSE comment every 15 s so the
+            # browser/proxy never sees a silent connection and drops it.
+            logger.info(
+                "[%d/%d] judging: %s (%s)", i + 1, total, suspect.name, suspect.file
+            )
             try:
                 bundle = build_evidence(suspect, explorer)
-                verdict = await agent.judge(bundle)
+
+                if evidence_is_oversized(bundle):
+                    logger.warning(
+                        "[%d/%d] SKIPPED (oversized evidence): %s",
+                        i + 1, total, suspect.name,
+                    )
+                    skip_verdict = Verdict(
+                        suspect=suspect,
+                        verdict="investigate",
+                        confidence=0,
+                        reason="Skipped: evidence too large for LLM context window. Review manually.",
+                        author_context="",
+                    )
+                    cache.set(key, skip_verdict)
+                    yield f"event: verdict\ndata: {skip_verdict.model_dump_json()}\n\n"
+                    continue
+
+                judge_task = asyncio.create_task(agent.judge(bundle))
+
+                try:
+                    while not judge_task.done():
+                        try:
+                            await asyncio.wait_for(asyncio.shield(judge_task), timeout=15.0)
+                        except asyncio.TimeoutError:
+                            logger.debug("  keepalive: still waiting for %s", suspect.name)
+                            yield ": keepalive\n\n"
+                except (asyncio.CancelledError, GeneratorExit):
+                    judge_task.cancel()
+                    raise
+
+                verdict = judge_task.result()   # re-raises any exception from judge()
                 cache.set(key, verdict)
-                payload = verdict.model_dump_json()
-                yield f"event: verdict\ndata: {payload}\n\n"
+                logger.info(
+                    "  -> verdict=%s confidence=%d",
+                    verdict.verdict, verdict.confidence,
+                )
+                yield f"event: verdict\ndata: {verdict.model_dump_json()}\n\n"
+
+            except asyncio.TimeoutError:
+                logger.warning("  -> TIMEOUT for %s", suspect.name)
+                timeout_verdict = Verdict(
+                    suspect=suspect,
+                    verdict="investigate",
+                    confidence=0,
+                    reason="Skipped: LLM timed out. Review manually.",
+                    author_context="",
+                )
+                cache.set(key, timeout_verdict)
+                yield f"event: verdict\ndata: {timeout_verdict.model_dump_json()}\n\n"
             except Exception as exc:
+                logger.error("  -> FAILED %s: %s", suspect.name, exc)
                 error_data = json.dumps({
                     "suspect": suspect.name,
                     "file": suspect.file,
@@ -185,6 +246,7 @@ async def _verdict_generator(explorer: GitExplorer, detector: DeadCodeDetector):
                 })
                 yield f"event: error\ndata: {error_data}\n\n"
 
+        logger.info("Analysis complete: %d suspects processed", total)
         yield "event: done\ndata: {}\n\n"
     finally:
         cache.close()
